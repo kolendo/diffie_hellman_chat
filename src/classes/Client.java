@@ -1,17 +1,29 @@
 package classes;
 
-import javax.swing.*;
-import java.awt.*;
+import org.json.simple.JSONObject;
+
+import java.awt.BorderLayout;
 import java.awt.event.ActionListener;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.io.OutputStream;
+import java.io.OutputStreamWriter;
 import java.net.Socket;
+import java.nio.charset.StandardCharsets;
 import java.util.Observable;
 import java.util.Observer;
+
+import javax.swing.Box;
+import javax.swing.JButton;
+import javax.swing.JFrame;
+import javax.swing.JScrollPane;
+import javax.swing.JTextArea;
+import javax.swing.JTextField;
+import javax.swing.SwingUtilities;
+import javax.swing.WindowConstants;
+
 
 /**
  * Klasa zarządzająca oknem klienta.
@@ -25,9 +37,9 @@ public class Client {
     /**
      * Klasa odpowiedzialna za komunikację z serwerem
      */
-    static class ChatAccess extends Observable {
+    static class ChatCommunication extends Observable {
         private Socket mSocket;
-        private OutputStream mOutputStream;
+        private OutputStreamWriter mOutputStreamWriter;
 
         /**
          * Powiadomienie o zmianach obserwującego GUI
@@ -40,14 +52,15 @@ public class Client {
         }
 
         /**
-         * Inicjalizacja socketu do serwera i wątku odpowiedzialnego za odbiór od serwera
+         * Inicjalizacja socketu i wątku odpowiedzialnego za odbiór od serwera
          * @param server adres IP
          * @param port
          * @throws IOException
          */
         public void InitSocket(String server, int port) throws IOException {
             mSocket = new Socket(server, port);
-            mOutputStream = mSocket.getOutputStream();
+			mOutputStreamWriter = new OutputStreamWriter(mSocket.getOutputStream(), StandardCharsets.UTF_8);
+//			mOutputStreamWriter.write(new JSONObject().put("msg", "keys").toString());
 
             Thread receivingThread = new Thread() {
                 @Override
@@ -69,15 +82,16 @@ public class Client {
 
         /**
          * Wysłanie tekstu na serwer
-         * @param text
+         * @param text wysłany tekst
          */
-        public void send(String text) {
-            try {
-                mOutputStream.write((text + CRLF).getBytes());
-                mOutputStream.flush();
-            } catch (IOException ex) {
-                notifyObservers(ex);
-            }
+        public void sendMessage(String text) {
+			try {
+				JSONObject jsonObject = new JSONObject();
+				jsonObject.put("msg", text);
+				mOutputStreamWriter.write(jsonObject.toString());
+			} catch (IOException e) {
+				notifyObservers(e);
+			}
         }
 
         /**
@@ -100,11 +114,11 @@ public class Client {
         private JTextArea mJTextArea;
         private JTextField mJTextField;
         private JButton mSendButton;
-        private ChatAccess mChatAccess;
+        private ChatCommunication mChatCommunication;
 
-        public ChatFrame(ChatAccess chatAccess) {
-            this.mChatAccess = chatAccess;
-            chatAccess.addObserver(this);
+        public ChatFrame(ChatCommunication chatCommunication) {
+            this.mChatCommunication = chatCommunication;
+            chatCommunication.addObserver(this);
             buildGUI();
         }
 
@@ -126,8 +140,9 @@ public class Client {
 
             ActionListener sendListener = e -> {
 				String str = mJTextField.getText();
-				if (str != null && str.trim().length() > 0)
-					mChatAccess.send(str);
+				if (str != null && str.trim().length() > 0) {
+                    mChatCommunication.sendMessage(str);
+                }
 				mJTextField.selectAll();
 				mJTextField.requestFocus();
 				mJTextField.setText("");
@@ -138,7 +153,7 @@ public class Client {
             this.addWindowListener(new WindowAdapter() {
                 @Override
                 public void windowClosing(WindowEvent e) {
-                    mChatAccess.close();
+                    mChatCommunication.close();
                 }
             });
         }
@@ -161,9 +176,9 @@ public class Client {
 
     public static void main(String[] args) {
         String server = args[0];
-        ChatAccess access = new ChatAccess();
+        ChatCommunication communication = new ChatCommunication();
 
-        JFrame frame = new ChatFrame(access);
+        JFrame frame = new ChatFrame(communication);
         frame.setTitle("Podłączono do " + server + ":" + PORT_ADDRESS_CLIENT);
         frame.setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
         frame.pack();
@@ -172,7 +187,7 @@ public class Client {
         frame.setVisible(true);
 
         try {
-            access.InitSocket(server, PORT_ADDRESS_CLIENT);
+            communication.InitSocket(server, PORT_ADDRESS_CLIENT);
         } catch (IOException ex) {
             System.out.println("Nie można się połączyć z " + server + ":" + PORT_ADDRESS_CLIENT);
             ex.printStackTrace();

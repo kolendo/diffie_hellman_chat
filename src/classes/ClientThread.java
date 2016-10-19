@@ -1,5 +1,9 @@
 package classes;
 
+import org.json.simple.JSONObject;
+import org.json.simple.parser.JSONParser;
+import org.json.simple.parser.ParseException;
+
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -18,6 +22,7 @@ public class ClientThread extends Thread {
 	private Socket mClientSocket = null;
 	private final ClientThread[] mClientThreads;
 	private int mMaxClientsCount;
+	private JSONParser mJSONParser = new JSONParser();
 
 	public ClientThread(Socket clientSocket, ClientThread[] threads) {
 		mClientSocket = clientSocket;
@@ -36,31 +41,33 @@ public class ClientThread extends Thread {
       /* Stworzenie strumieni wej/wyj. */
 			mDataInputStream = new DataInputStream(mClientSocket.getInputStream());
 			mPrintStream = new PrintStream(mClientSocket.getOutputStream());
-			String name;
 			while (true) {
+				System.out.println("while");
 				mPrintStream.println("Podaj swoją nazwę.");
-				name = mDataInputStream.readLine().trim();
-				if (name.indexOf('@') == -1) {
-					break;
-				} else {
-					mPrintStream.println("Nazwa nie powinna zawierać znaku '@'");
+				String content = mDataInputStream.readLine();
+				System.out.println(content);
+
+				try{
+					Object obj = mJSONParser.parse(content);
+					JSONObject jsonObject = (JSONObject) obj;
+					mClientName = (String) jsonObject.get("msg");
+					System.out.println("decoded" + mClientName);
+					if (mClientName.indexOf('@') == -1) {
+						break;
+					} else {
+						mPrintStream.println("Nazwa nie powinna zawierać znaku '@'");
+					}
+				} catch(ParseException pe) {
+					System.out.println(pe);
 				}
 			}
 
       /* Przywitanie nowego klienta. */
-			mPrintStream.println("Witaj " + name
-					+ " w naszym pokoju.");
+			mPrintStream.println("Witaj " + mClientName + " w naszym pokoju.");
 			synchronized (this) {
 				for (int i = 0; i < maxClientsCount; i++) {
-					if (threads[i] != null && threads[i] == this) {
-						mClientName = "@" + name;
-						break;
-					}
-				}
-				for (int i = 0; i < maxClientsCount; i++) {
 					if (threads[i] != null && threads[i] != this) {
-						threads[i].mPrintStream.println("*** Nowy użytkownik " + name
-								+ " dołączył do pokoju! ***");
+						threads[i].mPrintStream.println("*** Nowy użytkownik " + mClientName + " dołączył do pokoju! ***");
 					}
 				}
 			}
@@ -75,7 +82,7 @@ public class ClientThread extends Thread {
 					synchronized (this) {
 						for (int i = 0; i < maxClientsCount; i++) {
 							if (threads[i] != null && threads[i].mClientName != null) {
-								threads[i].mPrintStream.println("<" + name + "> " + line);
+								threads[i].mPrintStream.println("<" + mClientName + "> " + line);
 							}
 						}
 					}
@@ -85,12 +92,10 @@ public class ClientThread extends Thread {
 				for (int i = 0; i < maxClientsCount; i++) {
 					if (threads[i] != null && threads[i] != this
 							&& threads[i].mClientName != null) {
-						threads[i].mPrintStream.println("*** Uytkownik " + name
-								+ " wyszedł z pokoju! ***");
+						threads[i].mPrintStream.println("*** Uytkownik " + mClientName + " wyszedł z pokoju! ***");
 					}
 				}
 			}
-			mPrintStream.println("*** Bye " + name + " ***");
 
       /*
        * Czyszczenie miejsca w kolekcji wątków na serwerze.
