@@ -19,6 +19,7 @@ import models.EncryptionType;
  */
 public class ClientThread extends Thread {
 
+	private static final String CRLF = "\r\n";
 	private String mClientName, mMessage, mRequest;
 	private DataInputStream mDataInputStream = null;
 	private PrintStream mPrintStream = null;
@@ -29,6 +30,8 @@ public class ClientThread extends Thread {
 	private int VALUE_P, VALUE_G, value_b;
 	private double value_A, value_B, value_s;
 	private EncryptionType mEncryptionType = EncryptionType.NONE;
+	private JSONObject mJSONObject;
+	private boolean DIFFIE_READY = false;
 
 	public ClientThread(Socket clientSocket, ClientThread[] threads, int p, int g) {
 		mClientSocket = clientSocket;
@@ -38,7 +41,7 @@ public class ClientThread extends Thread {
 		VALUE_G = g;
 		Random generator = new Random();
 		value_b = generator.nextInt(10) + 1;
-		value_B = Math.pow(VALUE_G, value_b);
+		value_B = (Math.pow(VALUE_G, value_b) % VALUE_P);
 	}
 
 	/**
@@ -53,7 +56,9 @@ public class ClientThread extends Thread {
 			mDataInputStream = new DataInputStream(mClientSocket.getInputStream());
 			mPrintStream = new PrintStream(mClientSocket.getOutputStream());
 			while (true) {
-				mPrintStream.println("Podaj swoją nazwę.");
+				mJSONObject = new JSONObject();
+				mJSONObject.put("msg", "Podaj swoją nazwę.");
+				mPrintStream.println(mJSONObject.toString());
 				String msg = mDataInputStream.readLine().trim();
 				try{
 					Object obj = mJSONParser.parse(msg);
@@ -68,11 +73,16 @@ public class ClientThread extends Thread {
 			}
 
       /* Przywitanie nowego klienta. */
-			mPrintStream.println("Witaj " + mClientName + " w naszym pokoju.");
+			mJSONObject = new JSONObject();
+			mJSONObject.put("msg", "Witaj " + mClientName + " w naszym pokoju.");
+			mJSONObject.put("init", "start");
+			mPrintStream.println(mJSONObject.toString());
 			synchronized (this) {
+				mJSONObject = new JSONObject();
+				mJSONObject.put("msg", "*** Nowy użytkownik " + mClientName + " dołączył do pokoju! ***");
 				for (int i = 0; i < maxClientsCount; i++) {
 					if (threads[i] != null && threads[i] != this) {
-						threads[i].mPrintStream.println("*** Nowy użytkownik " + mClientName + " dołączył do pokoju! ***");
+						threads[i].mPrintStream.println(mJSONObject.toString());
 					}
 				}
 			}
@@ -85,12 +95,31 @@ public class ClientThread extends Thread {
 				} catch (ParseException e) {
 					e.printStackTrace();
 				}
+
 				JSONObject jsonObject = (JSONObject) obj;
-				if (jsonObject != null && jsonObject.get("a") != null) {
-					value_A = (Double) jsonObject.get("a");
+				if (jsonObject != null && jsonObject.get("A") != null) {
+					System.out.println("received: " + jsonObject.toString());
+					value_A = (double) jsonObject.get("A");
+					mJSONObject = new JSONObject();
+					mJSONObject.put("B", value_B);
+					mPrintStream.println(mJSONObject.toString());
+					value_s = (Math.pow(value_A, value_b) % VALUE_P);
+					System.out.println("s: " + value_s);
+					DIFFIE_READY = true;
+				}
+
+				if (jsonObject != null && jsonObject.get("request") != null) {
+					if (jsonObject.get("request").equals("keys")) {
+						System.out.println("received: " + jsonObject.toString());
+						mJSONObject = new JSONObject();
+						mJSONObject.put("p", VALUE_P);
+						mJSONObject.put("g", VALUE_G);
+						mPrintStream.println(mJSONObject.toString());
+					}
 				}
 
 				if (jsonObject != null && jsonObject.get("msg") != null) {
+					System.out.println("received: " + jsonObject.toString());
 					mMessage = (String) jsonObject.get("msg");
 					if (mMessage.startsWith("/quit")) {
 						break;
@@ -100,7 +129,10 @@ public class ClientThread extends Thread {
 						synchronized (this) {
 							for (int i = 0; i < maxClientsCount; i++) {
 								if (threads[i] != null && threads[i].mClientName != null) {
-									threads[i].mPrintStream.println("<" + mClientName + "> " + mMessage);
+									mJSONObject = new JSONObject();
+									mJSONObject.put("msg", mMessage);
+									mJSONObject.put("from", mClientName);
+									threads[i].mPrintStream.println(mJSONObject.toString());
 								}
 							}
 						}
@@ -110,7 +142,9 @@ public class ClientThread extends Thread {
 
 					}
 				}
+
 				if (jsonObject != null && jsonObject.get("encryption") != null) {
+					System.out.println("received: " + jsonObject.toString());
 					switch ((String) jsonObject.get("encryption")) {
 						case "xor": {
 							mEncryptionType = EncryptionType.XOR;
@@ -130,10 +164,11 @@ public class ClientThread extends Thread {
 			}
 
 			synchronized (this) {
+				mJSONObject = new JSONObject();
+				mJSONObject.put("msg", "*** Uytkownik " + mClientName + " wyszedł z pokoju! ***");
 				for (int i = 0; i < maxClientsCount; i++) {
-					if (threads[i] != null && threads[i] != this
-							&& threads[i].mClientName != null) {
-						threads[i].mPrintStream.println("*** Uytkownik " + mClientName + " wyszedł z pokoju! ***");
+					if (threads[i] != null && threads[i] != this && threads[i].mClientName != null) {
+						threads[i].mPrintStream.println(mJSONObject.toString());
 					}
 				}
 			}

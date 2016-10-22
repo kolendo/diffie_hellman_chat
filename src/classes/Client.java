@@ -1,6 +1,8 @@
 package classes;
 
 import org.json.simple.JSONObject;
+import org.json.simple.parser.JSONParser;
+import org.json.simple.parser.ParseException;
 
 import java.awt.BorderLayout;
 import java.awt.event.ActionListener;
@@ -10,11 +12,10 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
-import java.io.OutputStreamWriter;
 import java.net.Socket;
-import java.nio.charset.StandardCharsets;
 import java.util.Observable;
 import java.util.Observer;
+import java.util.Random;
 
 import javax.swing.Box;
 import javax.swing.JButton;
@@ -39,10 +40,14 @@ public class Client {
      * Klasa odpowiedzialna za komunikację z serwerem
      */
     static class ChatCommunication extends Observable {
+        private JSONParser mJSONParser = new JSONParser();
         private Socket mSocket;
         private OutputStream mOutputStream;
-        private OutputStreamWriter mOutputStreamWriter;
-        private static final String CRLF = "\r\n"; // newline
+        JSONObject mJSONObject = new JSONObject();
+        private static final String CRLF = "\r\n";
+        private int VALUE_P, VALUE_G, value_a;
+        private double value_A, value_B, value_s;
+        private boolean DIFFIE_READY = false;
 
         /**
          * Powiadomienie o zmianach obserwującego GUI
@@ -62,9 +67,9 @@ public class Client {
          */
         public void InitSocket(String server, int port) throws IOException {
             mSocket = new Socket(server, port);
-			mOutputStreamWriter = new OutputStreamWriter(mSocket.getOutputStream(), StandardCharsets.UTF_8);
             mOutputStream = mSocket.getOutputStream();
-//			mOutputStreamWriter.write(new JSONObject().put("msg", "keys").toString());
+            Random generator = new Random();
+            value_a = generator.nextInt(10) + 1;
 
             Thread receivingThread = new Thread() {
                 @Override
@@ -72,8 +77,57 @@ public class Client {
                     try {
                         BufferedReader reader = new BufferedReader(new InputStreamReader(mSocket.getInputStream()));
                         String line;
-                        while ((line = reader.readLine()) != null)
-                            notifyObservers(line);
+                        while ((line = reader.readLine()) != null){
+                            Object obj;
+                            try {
+                                obj = mJSONParser.parse(line);
+                            } catch (ParseException e) {
+                                e.printStackTrace();
+                                break;
+                            }
+                            JSONObject jsonObject = (JSONObject) obj;
+                            System.out.println("received: " + jsonObject.toString());
+
+                            if (jsonObject.get("msg") != null) {
+                                System.out.println("received: " + jsonObject.toString());
+                                if (jsonObject.get("from") != null) {
+                                    notifyObservers("<" + jsonObject.get("from") + "> " + jsonObject.get("msg"));
+                                } else {
+                                    notifyObservers(jsonObject.get("msg"));
+                                }
+                            }
+
+                            if (jsonObject.get("p") != null && jsonObject.get("g") != null) {
+                                System.out.println("received: " + jsonObject.toString());
+                                VALUE_P = (int)(long) jsonObject.get("p");
+                                VALUE_G = (int)(long) jsonObject.get("g");
+                                value_A = (Math.pow(VALUE_G, value_a) % VALUE_P);
+                                mJSONObject = new JSONObject();
+                                mJSONObject.put("A", value_A);
+                                mOutputStream.write((mJSONObject.toString() + CRLF).getBytes());
+                                mOutputStream.flush();
+                            }
+
+                            if (jsonObject.get("B") != null) {
+                                System.out.println("received: " + jsonObject.toString());
+                                value_B = (double) jsonObject.get("B");
+                                value_s = (Math.pow(value_B, value_a) % VALUE_P);
+                                System.out.println("s: " + value_s);
+                                DIFFIE_READY = true;
+                            }
+
+                            if (jsonObject.get("init") != null) {
+                                System.out.println("received: " + jsonObject.toString());
+                                String init = (String) jsonObject.get("init");
+                                if (init.equals("start")) {
+                                    System.out.println("rstart auth");
+                                    mJSONObject = new JSONObject();
+                                    mJSONObject.put("request", "keys");
+                                    mOutputStream.write((mJSONObject.toString() + CRLF).getBytes());
+                                }
+                            }
+
+                        }
                     } catch (IOException ex) {
                         notifyObservers(ex);
                     }
@@ -89,9 +143,9 @@ public class Client {
         public void sendMessage(String text) {
 			try {
                 System.out.println("wysłanie msg: " + text);
-				JSONObject jsonObject = new JSONObject();
-				jsonObject.put("msg", text + CRLF);
-                mOutputStream.write((jsonObject.toString()).getBytes());
+                mJSONObject = new JSONObject();
+                mJSONObject.put("msg", text);
+                mOutputStream.write((mJSONObject.toString() + CRLF).getBytes());
                 mOutputStream.flush();
 			} catch (IOException e) {
                 System.out.println(e);
