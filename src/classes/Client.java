@@ -9,6 +9,7 @@ import java.awt.event.WindowEvent;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
@@ -39,7 +40,9 @@ public class Client {
      */
     static class ChatCommunication extends Observable {
         private Socket mSocket;
+        private OutputStream mOutputStream;
         private OutputStreamWriter mOutputStreamWriter;
+        private static final String CRLF = "\r\n"; // newline
 
         /**
          * Powiadomienie o zmianach obserwującego GUI
@@ -60,6 +63,7 @@ public class Client {
         public void InitSocket(String server, int port) throws IOException {
             mSocket = new Socket(server, port);
 			mOutputStreamWriter = new OutputStreamWriter(mSocket.getOutputStream(), StandardCharsets.UTF_8);
+            mOutputStream = mSocket.getOutputStream();
 //			mOutputStreamWriter.write(new JSONObject().put("msg", "keys").toString());
 
             Thread receivingThread = new Thread() {
@@ -78,18 +82,19 @@ public class Client {
             receivingThread.start();
         }
 
-        private static final String CRLF = "\r\n"; // nowa linia
-
         /**
          * Wysłanie tekstu na serwer
          * @param text wysłany tekst
          */
         public void sendMessage(String text) {
 			try {
+                System.out.println("wysłanie msg: " + text);
 				JSONObject jsonObject = new JSONObject();
-				jsonObject.put("msg", text);
-				mOutputStreamWriter.write(jsonObject.toString());
+				jsonObject.put("msg", text + CRLF);
+                mOutputStream.write((jsonObject.toString()).getBytes());
+                mOutputStream.flush();
 			} catch (IOException e) {
+                System.out.println(e);
 				notifyObservers(e);
 			}
         }
