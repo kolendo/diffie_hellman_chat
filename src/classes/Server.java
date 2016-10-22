@@ -21,8 +21,6 @@ public class Server {
 	private static final ClientThread[] THREADS = new ClientThread[MAX_CLIENTS_COUNT];
 	private static ServerSocket sServerSocket = null;
 	private static Socket sClientSocket = null;
-	private static final int VALUE_P = 23;
-	private static final int VALUE_G = 5;
 
 	@SuppressWarnings("InfiniteLoopStatement")
 	public static void main(String args[]) {
@@ -48,7 +46,7 @@ public class Server {
 				int i;
 				for (i = 0; i < MAX_CLIENTS_COUNT; i++) {
 					if (THREADS[i] == null) {
-						(THREADS[i] = new ClientThread(sClientSocket, THREADS, VALUE_P, VALUE_G)).start();
+						(THREADS[i] = new ClientThread(sClientSocket, THREADS)).start();
 						break;
 					}
 				}

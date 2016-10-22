@@ -13,6 +13,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.Socket;
+import java.util.Base64;
 import java.util.Observable;
 import java.util.Observer;
 import java.util.Random;
@@ -47,7 +48,7 @@ public class Client {
         private static final String CRLF = "\r\n";
         private int VALUE_P, VALUE_G, value_a;
         private double value_A, value_B, value_s;
-        private boolean DIFFIE_READY = false;
+        private boolean DIFFIE_READY = false, INIT_MSG = true;
 
         /**
          * Powiadomienie o zmianach obserwującego GUI
@@ -60,7 +61,13 @@ public class Client {
         }
 
         /**
-         * Inicjalizacja socketu i wątku odpowiedzialnego za odbiór od serwera
+         * Inicjalizacja socketu i wątku odpowiedzialnego za odbiór wiadomości z serwera.
+         *
+         * Wątek zajmuje się filtrowaniem odebranych danych ze struktury JSON i wykonanie
+         * odpowiedniej akcji. Kiedy klient otrzyma dane {"init":"start"} rozpoczyna
+         * implementację protokułu Diffiego-Hellmana, po której zakończeniu ustawia flagę
+         * zezwalającą na wysyłanie zaszyfrowanych wiadomości w Base64.
+         *
          * @param server adres IP
          * @param port
          * @throws IOException
@@ -91,7 +98,9 @@ public class Client {
                             if (jsonObject.get("msg") != null) {
                                 System.out.println("received: " + jsonObject.toString());
                                 if (jsonObject.get("from") != null) {
-                                    notifyObservers("<" + jsonObject.get("from") + "> " + jsonObject.get("msg"));
+                                    byte[] base64decoded = Base64.getDecoder().decode((String) jsonObject.get("msg"));
+                                    String decoded = new String(base64decoded, "utf-8");
+                                    notifyObservers("<" + jsonObject.get("from") + "> " + decoded);
                                 } else {
                                     notifyObservers(jsonObject.get("msg"));
                                 }
@@ -101,6 +110,12 @@ public class Client {
                                 System.out.println("received: " + jsonObject.toString());
                                 VALUE_P = (int)(long) jsonObject.get("p");
                                 VALUE_G = (int)(long) jsonObject.get("g");
+                                if (jsonObject.get("B") != null) {
+                                    value_B = (double) jsonObject.get("B");
+                                    value_s = (Math.pow(value_B, value_a) % VALUE_P);
+                                    DIFFIE_READY = true;
+                                    System.out.println("s: " + value_s);
+                                }
                                 value_A = (Math.pow(VALUE_G, value_a) % VALUE_P);
                                 mJSONObject = new JSONObject();
                                 mJSONObject.put("A", value_A);
@@ -138,19 +153,25 @@ public class Client {
 
         /**
          * Wysłanie tekstu na serwer
-         * @param text wysłany tekst
+         * @param text wysyłany tekst
          */
         public void sendMessage(String text) {
-			try {
-                System.out.println("wysłanie msg: " + text);
-                mJSONObject = new JSONObject();
-                mJSONObject.put("msg", text);
-                mOutputStream.write((mJSONObject.toString() + CRLF).getBytes());
-                mOutputStream.flush();
-			} catch (IOException e) {
+            try {
+                if (DIFFIE_READY) {
+                    mJSONObject = new JSONObject();
+                    mJSONObject.put("msg", Base64.getEncoder().encodeToString(text.getBytes("utf-8")));
+                    mOutputStream.write((mJSONObject.toString() + CRLF).getBytes());
+                    mOutputStream.flush();
+                } else if (INIT_MSG) {
+                    mJSONObject = new JSONObject();
+                    mJSONObject.put("msg", text);
+                    mOutputStream.write((mJSONObject.toString() + CRLF).getBytes());
+                    mOutputStream.flush();
+                }
+            } catch (IOException e) {
                 System.out.println(e);
-				notifyObservers(e);
-			}
+                notifyObservers(e);
+            }
         }
 
         /**

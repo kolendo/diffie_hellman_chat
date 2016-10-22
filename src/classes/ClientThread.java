@@ -8,6 +8,7 @@ import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.net.Socket;
+import java.util.Base64;
 import java.util.Random;
 
 import models.EncryptionType;
@@ -33,13 +34,19 @@ public class ClientThread extends Thread {
 	private JSONObject mJSONObject;
 	private boolean DIFFIE_READY = false;
 
-	public ClientThread(Socket clientSocket, ClientThread[] threads, int p, int g) {
+	/**
+	 * Konstruktor wątku klienta. Losuje wartościom P, G oraz b losową, unikalną dla klienta liczbę.
+	 *
+	 * @param clientSocket socket klienta
+	 * @param threads kolekcja pozostałych wątków (innych klientów) na serwerze
+	 */
+	public ClientThread(Socket clientSocket, ClientThread[] threads) {
 		mClientSocket = clientSocket;
 		mClientThreads = threads;
 		mMaxClientsCount = threads.length;
-		VALUE_P = p;
-		VALUE_G = g;
 		Random generator = new Random();
+		VALUE_P = generator.nextInt(100) + 1;
+		VALUE_G = generator.nextInt(100) + 1;
 		value_b = generator.nextInt(10) + 1;
 		value_B = (Math.pow(VALUE_G, value_b) % VALUE_P);
 	}
@@ -100,12 +107,9 @@ public class ClientThread extends Thread {
 				if (jsonObject != null && jsonObject.get("A") != null) {
 					System.out.println("received: " + jsonObject.toString());
 					value_A = (double) jsonObject.get("A");
-					mJSONObject = new JSONObject();
-					mJSONObject.put("B", value_B);
-					mPrintStream.println(mJSONObject.toString());
 					value_s = (Math.pow(value_A, value_b) % VALUE_P);
-					System.out.println("s: " + value_s);
 					DIFFIE_READY = true;
+					System.out.println("s: " + value_s);
 				}
 
 				if (jsonObject != null && jsonObject.get("request") != null) {
@@ -114,6 +118,7 @@ public class ClientThread extends Thread {
 						mJSONObject = new JSONObject();
 						mJSONObject.put("p", VALUE_P);
 						mJSONObject.put("g", VALUE_G);
+						mJSONObject.put("B", value_B);
 						mPrintStream.println(mJSONObject.toString());
 					}
 				}
@@ -121,7 +126,10 @@ public class ClientThread extends Thread {
 				if (jsonObject != null && jsonObject.get("msg") != null) {
 					System.out.println("received: " + jsonObject.toString());
 					mMessage = (String) jsonObject.get("msg");
-					if (mMessage.startsWith("/quit")) {
+					byte[] base64decoded = Base64.getDecoder().decode(mMessage);
+					String decoded = new String(base64decoded, "utf-8");
+
+					if (decoded.startsWith("/quit")) {
 						break;
 					}
 					if (mEncryptionType == EncryptionType.NONE) {
