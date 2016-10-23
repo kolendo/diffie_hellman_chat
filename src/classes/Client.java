@@ -37,6 +37,8 @@ import models.EncryptionType;
  *
  * @author Wojtek Kolendo
  */
+
+@SuppressWarnings({"Duplicates", "unchecked"})
 public class Client {
 
     private static final int PORT_ADDRESS_CLIENT = 8080;
@@ -187,12 +189,15 @@ public class Client {
                     mJSONObject.put("msg", text);
                     mOutputStream.write((mJSONObject.toString() + CRLF).getBytes());
                     mOutputStream.flush();
+                    if (INIT_MSG) {
+                        INIT_MSG = false;
+                    }
                 } else if (DIFFIE_READY) {
                     switch (mEncryptionType) {
                         case XOR: {
-                            text = codeXor(text, value_s);
+                            text = codeXor(Base64.getEncoder().encodeToString(text.getBytes("utf-8")), value_s);
                             mJSONObject = new JSONObject();
-                            mJSONObject.put("msg", Base64.getEncoder().encodeToString(text.getBytes("utf-8")));
+                            mJSONObject.put("msg", text);
                             mOutputStream.write((mJSONObject.toString() + CRLF).getBytes());
                             mOutputStream.flush();
                             break;
@@ -254,7 +259,6 @@ public class Client {
 
         private String codeXor(String string, int secret){
             byte b = (byte) (secret & 0xFF);
-            System.out.println(b);
             StringBuilder encrypted = new StringBuilder();
             for (byte c : string.getBytes(StandardCharsets.UTF_8)){
                 encrypted.append((char)(c ^ b));
@@ -341,7 +345,7 @@ public class Client {
             mCaesarButton = new JButton("Caesar");
             box.add(mJTextField);
             box.add(mSendButton);
-            boxEncrypt.add(new JLabel("Encryption mode:\t"));
+            boxEncrypt.add(new JLabel("Encryption mode:  "));
             boxEncrypt.add(mNoneButton);
             boxEncrypt.add(mXorButton);
             boxEncrypt.add(mCaesarButton);

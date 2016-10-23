@@ -18,6 +18,8 @@ import models.EncryptionType;
  *
  * @author Wojtek Kolendo
  */
+
+@SuppressWarnings({"Duplicates", "unchecked"})
 public class ClientThread extends Thread {
 
 	private String mClientName, mMessage;
@@ -137,8 +139,16 @@ public class ClientThread extends Thread {
 								for (int i = 0; i < maxClientsCount; i++) {
 									if (threads[i] != null && threads[i].mClientName != null) {
 										mJSONObject = new JSONObject();
-										String tempMessage = codeXor(mMessage, threads[i].value_s);
-										mJSONObject.put("msg", tempMessage);
+										String tempMessage;
+										if (threads[i].mEncryptionType == EncryptionType.XOR) {
+											tempMessage = codeXor(mMessage, threads[i].value_s);
+											mJSONObject.put("msg", tempMessage);
+										} else if (threads[i].mEncryptionType == EncryptionType.CAESAR) {
+											tempMessage = encodeCaesar(mMessage, threads[i].value_s);
+											mJSONObject.put("msg", tempMessage);
+										} else {
+											mJSONObject.put("msg", mMessage);
+										}
 										mJSONObject.put("from", mClientName);
 										threads[i].mPrintStream.println(mJSONObject.toString());
 									}
@@ -152,8 +162,16 @@ public class ClientThread extends Thread {
 								for (int i = 0; i < maxClientsCount; i++) {
 									if (threads[i] != null && threads[i].mClientName != null) {
 										mJSONObject = new JSONObject();
-										String tempMessage = encodeCaesar(mMessage, threads[i].value_s);
-										mJSONObject.put("msg", tempMessage);
+										String tempMessage;
+										if (threads[i].mEncryptionType == EncryptionType.XOR) {
+											tempMessage = codeXor(mMessage, threads[i].value_s);
+											mJSONObject.put("msg", tempMessage);
+										} else if (threads[i].mEncryptionType == EncryptionType.CAESAR) {
+											tempMessage = encodeCaesar(mMessage, threads[i].value_s);
+											mJSONObject.put("msg", tempMessage);
+										} else {
+											mJSONObject.put("msg", mMessage);
+										}
 										mJSONObject.put("from", mClientName);
 										threads[i].mPrintStream.println(mJSONObject.toString());
 									}
@@ -166,7 +184,16 @@ public class ClientThread extends Thread {
 								for (int i = 0; i < maxClientsCount; i++) {
 									if (threads[i] != null && threads[i].mClientName != null) {
 										mJSONObject = new JSONObject();
-										mJSONObject.put("msg", mMessage);
+										String tempMessage;
+										if (threads[i].mEncryptionType == EncryptionType.XOR) {
+											tempMessage = codeXor(mMessage, threads[i].value_s);
+											mJSONObject.put("msg", tempMessage);
+										} else if (threads[i].mEncryptionType == EncryptionType.CAESAR) {
+											tempMessage = encodeCaesar(mMessage, threads[i].value_s);
+											mJSONObject.put("msg", tempMessage);
+										} else {
+											mJSONObject.put("msg", mMessage);
+										}
 										mJSONObject.put("from", mClientName);
 										threads[i].mPrintStream.println(mJSONObject.toString());
 									}
@@ -223,6 +250,7 @@ public class ClientThread extends Thread {
 			mPrintStream.close();
 			mClientSocket.close();
 		} catch (IOException e) {
+
 		}
 	}
 
