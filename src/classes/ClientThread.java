@@ -8,7 +8,7 @@ import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.net.Socket;
-import java.util.Base64;
+import java.nio.charset.StandardCharsets;
 import java.util.Random;
 
 import models.EncryptionType;
@@ -20,19 +20,18 @@ import models.EncryptionType;
  */
 public class ClientThread extends Thread {
 
-	private static final String CRLF = "\r\n";
-	private String mClientName, mMessage, mRequest;
+	private String mClientName, mMessage;
 	private DataInputStream mDataInputStream = null;
 	private PrintStream mPrintStream = null;
 	private Socket mClientSocket = null;
 	private final ClientThread[] mClientThreads;
 	private int mMaxClientsCount;
 	private JSONParser mJSONParser = new JSONParser();
-	private int VALUE_P, VALUE_G, value_b;
-	private double value_A, value_B, value_s;
+	private int VALUE_P, VALUE_G, value_b, value_s;
+	private double value_A, value_B;
 	private EncryptionType mEncryptionType = EncryptionType.NONE;
 	private JSONObject mJSONObject;
-	private boolean DIFFIE_READY = false;
+	public boolean DIFFIE_READY = false;
 
 	/**
 	 * Konstruktor wątku klienta. Losuje wartościom P, G oraz b losową, unikalną dla klienta liczbę.
@@ -107,7 +106,7 @@ public class ClientThread extends Thread {
 				if (jsonObject != null && jsonObject.get("A") != null) {
 					System.out.println("received: " + jsonObject.toString());
 					value_A = (double) jsonObject.get("A");
-					value_s = (Math.pow(value_A, value_b) % VALUE_P);
+					value_s = (int) (Math.pow(value_A, value_b) % VALUE_P);
 					DIFFIE_READY = true;
 					System.out.println("s: " + value_s);
 				}
@@ -123,31 +122,58 @@ public class ClientThread extends Thread {
 					}
 				}
 
-				if (jsonObject != null && jsonObject.get("msg") != null) {
+				/* Wysłanie wiadomości do pozostałych klientów. */
+				if (DIFFIE_READY && jsonObject != null && jsonObject.get("msg") != null) {
 					System.out.println("received: " + jsonObject.toString());
 					mMessage = (String) jsonObject.get("msg");
-					byte[] base64decoded = Base64.getDecoder().decode(mMessage);
-					String decoded = new String(base64decoded, "utf-8");
-
-					if (decoded.startsWith("/quit")) {
+					if (mMessage.startsWith("/quit")) {
 						break;
 					}
-					if (mEncryptionType == EncryptionType.NONE) {
-          				/* Wysłanie wiadomości do pozostałych klientów. */
-						synchronized (this) {
-							for (int i = 0; i < maxClientsCount; i++) {
-								if (threads[i] != null && threads[i].mClientName != null) {
-									mJSONObject = new JSONObject();
-									mJSONObject.put("msg", mMessage);
-									mJSONObject.put("from", mClientName);
-									threads[i].mPrintStream.println(mJSONObject.toString());
+
+					switch (mEncryptionType) {
+						case XOR: {
+							mMessage = codeXor(mMessage, value_s);
+							synchronized (this) {
+								for (int i = 0; i < maxClientsCount; i++) {
+									if (threads[i] != null && threads[i].mClientName != null) {
+										mJSONObject = new JSONObject();
+										String tempMessage = codeXor(mMessage, threads[i].value_s);
+										mJSONObject.put("msg", tempMessage);
+										mJSONObject.put("from", mClientName);
+										threads[i].mPrintStream.println(mJSONObject.toString());
+									}
 								}
 							}
+							break;
 						}
-					} else if (mEncryptionType == EncryptionType.XOR) {
-
-					} else if (mEncryptionType == EncryptionType.CESAR) {
-
+						case CAESAR: {
+							mMessage = decodeCaesar(mMessage, value_s);
+							synchronized (this) {
+								for (int i = 0; i < maxClientsCount; i++) {
+									if (threads[i] != null && threads[i].mClientName != null) {
+										mJSONObject = new JSONObject();
+										String tempMessage = encodeCaesar(mMessage, threads[i].value_s);
+										mJSONObject.put("msg", tempMessage);
+										mJSONObject.put("from", mClientName);
+										threads[i].mPrintStream.println(mJSONObject.toString());
+									}
+								}
+							}
+							break;
+						}
+						default: {
+							synchronized (this) {
+								for (int i = 0; i < maxClientsCount; i++) {
+									if (threads[i] != null && threads[i].mClientName != null) {
+										mJSONObject = new JSONObject();
+										mJSONObject.put("msg", mMessage);
+										mJSONObject.put("from", mClientName);
+										threads[i].mPrintStream.println(mJSONObject.toString());
+									}
+								}
+							}
+							break;
+						}
 					}
 				}
 
@@ -158,8 +184,8 @@ public class ClientThread extends Thread {
 							mEncryptionType = EncryptionType.XOR;
 							break;
 						}
-						case "cesar": {
-							mEncryptionType = EncryptionType.CESAR;
+						case "caesar": {
+							mEncryptionType = EncryptionType.CAESAR;
 							break;
 						}
 						default: {
@@ -180,7 +206,6 @@ public class ClientThread extends Thread {
 					}
 				}
 			}
-
       /*
        * Czyszczenie miejsca w kolekcji wątków na serwerze.
        */
@@ -199,5 +224,36 @@ public class ClientThread extends Thread {
 			mClientSocket.close();
 		} catch (IOException e) {
 		}
+	}
+
+	private String decodeCaesar(String text, int offset) {
+		return encodeCaesar(text, 26-offset);
+	}
+
+	private String encodeCaesar(String enc, int offset) {
+		offset = offset % 26 + 26;
+		StringBuilder encoded = new StringBuilder();
+		for (char i : enc.toCharArray()) {
+			if (Character.isLetter(i)) {
+				if (Character.isUpperCase(i)) {
+					encoded.append((char) ('A' + (i - 'A' + offset) % 26 ));
+				} else {
+					encoded.append((char) ('a' + (i - 'a' + offset) % 26 ));
+				}
+			} else {
+				encoded.append(i);
+			}
+		}
+		return encoded.toString();
+	}
+
+	private String codeXor(String string, int secret){
+		byte b = (byte) (secret & 0xFF);
+		System.out.println(b);
+		StringBuilder encrypted = new StringBuilder();
+		for (byte c : string.getBytes(StandardCharsets.UTF_8)){
+			encrypted.append((char)(c ^ b));
+		}
+		return encrypted.toString();
 	}
 }

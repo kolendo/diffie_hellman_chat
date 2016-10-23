@@ -7,7 +7,7 @@ public enum EncryptionType {
 
 	NONE,
 	XOR,
-	CESAR;
+	CAESAR;
 
 	EncryptionType() {
 	}

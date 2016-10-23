@@ -13,6 +13,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.Socket;
+import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Observable;
 import java.util.Observer;
@@ -21,11 +22,14 @@ import java.util.Random;
 import javax.swing.Box;
 import javax.swing.JButton;
 import javax.swing.JFrame;
+import javax.swing.JLabel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
 import javax.swing.WindowConstants;
+
+import models.EncryptionType;
 
 
 /**
@@ -46,9 +50,10 @@ public class Client {
         private OutputStream mOutputStream;
         JSONObject mJSONObject = new JSONObject();
         private static final String CRLF = "\r\n";
-        private int VALUE_P, VALUE_G, value_a;
-        private double value_A, value_B, value_s;
+        private int VALUE_P, VALUE_G, value_a, value_s;
+        private double value_A, value_B;
         private boolean DIFFIE_READY = false, INIT_MSG = true;
+        private EncryptionType mEncryptionType = EncryptionType.NONE;
 
         /**
          * Powiadomienie o zmianach obserwującego GUI
@@ -66,7 +71,8 @@ public class Client {
          * Wątek zajmuje się filtrowaniem odebranych danych ze struktury JSON i wykonanie
          * odpowiedniej akcji. Kiedy klient otrzyma dane {"init":"start"} rozpoczyna
          * implementację protokułu Diffiego-Hellmana, po której zakończeniu ustawia flagę
-         * zezwalającą na wysyłanie zaszyfrowanych wiadomości w Base64.
+         * zezwalającą na wysyłanie zaszyfrowanych wiadomości w Base64 oraz dodatkowo wcześniej w
+         * szyfsze Cezara, Xor lub żadnym.
          *
          * @param server adres IP
          * @param port
@@ -93,14 +99,33 @@ public class Client {
                                 break;
                             }
                             JSONObject jsonObject = (JSONObject) obj;
-                            System.out.println("received: " + jsonObject.toString());
 
                             if (jsonObject.get("msg") != null) {
                                 System.out.println("received: " + jsonObject.toString());
                                 if (jsonObject.get("from") != null) {
-                                    byte[] base64decoded = Base64.getDecoder().decode((String) jsonObject.get("msg"));
-                                    String decoded = new String(base64decoded, "utf-8");
-                                    notifyObservers("<" + jsonObject.get("from") + "> " + decoded);
+                                    switch (mEncryptionType) {
+                                        case XOR: {
+                                            String decodedMsg = codeXor((String) jsonObject.get("msg"), value_s);
+                                            byte[] base64decoded = Base64.getDecoder().decode(decodedMsg);
+                                            String decoded = new String(base64decoded, "utf-8");
+                                            notifyObservers("<" + jsonObject.get("from") + "> " + decoded);
+                                            break;
+                                        }
+                                        case CAESAR: {
+                                            String decodedMsg = decodeCaesar((String) jsonObject.get("msg"), value_s);
+                                            byte[] base64decoded = Base64.getDecoder().decode(decodedMsg);
+                                            String decoded = new String(base64decoded, "utf-8");
+                                            notifyObservers("<" + jsonObject.get("from") + "> " + decoded);
+                                            break;
+                                        }
+                                        default: {
+                                            byte[] base64decoded = Base64.getDecoder().decode((String) jsonObject.get("msg"));
+                                            String decoded = new String(base64decoded, "utf-8");
+                                            notifyObservers("<" + jsonObject.get("from") + "> " + decoded);
+                                            break;
+                                        }
+                                    }
+
                                 } else {
                                     notifyObservers(jsonObject.get("msg"));
                                 }
@@ -112,7 +137,7 @@ public class Client {
                                 VALUE_G = (int)(long) jsonObject.get("g");
                                 if (jsonObject.get("B") != null) {
                                     value_B = (double) jsonObject.get("B");
-                                    value_s = (Math.pow(value_B, value_a) % VALUE_P);
+                                    value_s = (int)(Math.pow(value_B, value_a) % VALUE_P);
                                     DIFFIE_READY = true;
                                     System.out.println("s: " + value_s);
                                 }
@@ -126,7 +151,7 @@ public class Client {
                             if (jsonObject.get("B") != null) {
                                 System.out.println("received: " + jsonObject.toString());
                                 value_B = (double) jsonObject.get("B");
-                                value_s = (Math.pow(value_B, value_a) % VALUE_P);
+                                value_s = (int)(Math.pow(value_B, value_a) % VALUE_P);
                                 System.out.println("s: " + value_s);
                                 DIFFIE_READY = true;
                             }
@@ -135,7 +160,7 @@ public class Client {
                                 System.out.println("received: " + jsonObject.toString());
                                 String init = (String) jsonObject.get("init");
                                 if (init.equals("start")) {
-                                    System.out.println("rstart auth");
+                                    System.out.println("start auth");
                                     mJSONObject = new JSONObject();
                                     mJSONObject.put("request", "keys");
                                     mOutputStream.write((mJSONObject.toString() + CRLF).getBytes());
@@ -155,18 +180,39 @@ public class Client {
          * Wysłanie tekstu na serwer
          * @param text wysyłany tekst
          */
-        public void sendMessage(String text) {
+        private void sendMessage(String text) {
             try {
-                if (DIFFIE_READY) {
-                    mJSONObject = new JSONObject();
-                    mJSONObject.put("msg", Base64.getEncoder().encodeToString(text.getBytes("utf-8")));
-                    mOutputStream.write((mJSONObject.toString() + CRLF).getBytes());
-                    mOutputStream.flush();
-                } else if (INIT_MSG) {
+                if (INIT_MSG || text.startsWith("/quit")) {
                     mJSONObject = new JSONObject();
                     mJSONObject.put("msg", text);
                     mOutputStream.write((mJSONObject.toString() + CRLF).getBytes());
                     mOutputStream.flush();
+                } else if (DIFFIE_READY) {
+                    switch (mEncryptionType) {
+                        case XOR: {
+                            text = codeXor(text, value_s);
+                            mJSONObject = new JSONObject();
+                            mJSONObject.put("msg", Base64.getEncoder().encodeToString(text.getBytes("utf-8")));
+                            mOutputStream.write((mJSONObject.toString() + CRLF).getBytes());
+                            mOutputStream.flush();
+                            break;
+                        }
+                        case CAESAR: {
+                            text = encodeCaesar(Base64.getEncoder().encodeToString(text.getBytes("utf-8")), value_s);
+                            mJSONObject = new JSONObject();
+                            mJSONObject.put("msg", text);
+                            mOutputStream.write((mJSONObject.toString() + CRLF).getBytes());
+                            mOutputStream.flush();
+                            break;
+                        }
+                        default: {
+                            mJSONObject = new JSONObject();
+                            mJSONObject.put("msg", Base64.getEncoder().encodeToString(text.getBytes("utf-8")));
+                            mOutputStream.write((mJSONObject.toString() + CRLF).getBytes());
+                            mOutputStream.flush();
+                            break;
+                        }
+                    }
                 }
             } catch (IOException e) {
                 System.out.println(e);
@@ -177,11 +223,84 @@ public class Client {
         /**
          * Zamykanie socketa
          */
-        public void close() {
+        private void close() {
             try {
                 mSocket.close();
             } catch (IOException ex) {
                 notifyObservers(ex);
+            }
+        }
+
+        private String decodeCaesar(String text, int offset) {
+            return encodeCaesar(text, 26-offset);
+        }
+
+        private String encodeCaesar(String enc, int offset) {
+            offset = offset % 26 + 26;
+            StringBuilder encoded = new StringBuilder();
+            for (char i : enc.toCharArray()) {
+                if (Character.isLetter(i)) {
+                    if (Character.isUpperCase(i)) {
+                        encoded.append((char) ('A' + (i - 'A' + offset) % 26 ));
+                    } else {
+                        encoded.append((char) ('a' + (i - 'a' + offset) % 26 ));
+                    }
+                } else {
+                    encoded.append(i);
+                }
+            }
+            return encoded.toString();
+        }
+
+        private String codeXor(String string, int secret){
+            byte b = (byte) (secret & 0xFF);
+            System.out.println(b);
+            StringBuilder encrypted = new StringBuilder();
+            for (byte c : string.getBytes(StandardCharsets.UTF_8)){
+                encrypted.append((char)(c ^ b));
+            }
+            return encrypted.toString();
+        }
+
+        public void setEncryptionType(EncryptionType encryptionType) {
+            mEncryptionType = encryptionType;
+            switch (encryptionType) {
+                case XOR: {
+                    System.out.println("set xor");
+                    mJSONObject = new JSONObject();
+                    mJSONObject.put("encryption", "xor");
+                    try {
+                        mOutputStream.write((mJSONObject.toString() + CRLF).getBytes());
+                        mOutputStream.flush();
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                    break;
+                }
+                case CAESAR: {
+                    System.out.println("set caesar");
+                    mJSONObject = new JSONObject();
+                    mJSONObject.put("encryption", "caesar");
+                    try {
+                        mOutputStream.write((mJSONObject.toString() + CRLF).getBytes());
+                        mOutputStream.flush();
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                    break;
+                }
+                default: {
+                    System.out.println("set none");
+                    mJSONObject = new JSONObject();
+                    mJSONObject.put("encryption", "none");
+                    try {
+                        mOutputStream.write((mJSONObject.toString() + CRLF).getBytes());
+                        mOutputStream.flush();
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                    break;
+                }
             }
         }
     }
@@ -193,7 +312,7 @@ public class Client {
 
         private JTextArea mJTextArea;
         private JTextField mJTextField;
-        private JButton mSendButton;
+        private JButton mSendButton, mNoneButton, mXorButton, mCaesarButton;
         private ChatCommunication mChatCommunication;
 
         public ChatFrame(ChatCommunication chatCommunication) {
@@ -212,11 +331,20 @@ public class Client {
             add(new JScrollPane(mJTextArea), BorderLayout.CENTER);
 
             Box box = Box.createHorizontalBox();
+            Box boxEncrypt= Box.createHorizontalBox();
             add(box, BorderLayout.SOUTH);
+            add(boxEncrypt, BorderLayout.NORTH);
             mJTextField = new JTextField();
             mSendButton = new JButton("Send");
+            mNoneButton = new JButton("None");
+            mXorButton = new JButton("XOR");
+            mCaesarButton = new JButton("Caesar");
             box.add(mJTextField);
             box.add(mSendButton);
+            boxEncrypt.add(new JLabel("Encryption mode:\t"));
+            boxEncrypt.add(mNoneButton);
+            boxEncrypt.add(mXorButton);
+            boxEncrypt.add(mCaesarButton);
 
             ActionListener sendListener = e -> {
 				String str = mJTextField.getText();
@@ -227,8 +355,22 @@ public class Client {
 				mJTextField.requestFocus();
 				mJTextField.setText("");
 			};
+
+            ActionListener noneListener = e -> {
+                mChatCommunication.setEncryptionType(EncryptionType.NONE);
+            };
+            ActionListener xorListener = e -> {
+                mChatCommunication.setEncryptionType(EncryptionType.XOR);
+            };
+            ActionListener caesarListener = e -> {
+                mChatCommunication.setEncryptionType(EncryptionType.CAESAR);
+            };
+
             mJTextField.addActionListener(sendListener);
             mSendButton.addActionListener(sendListener);
+            mNoneButton.addActionListener(noneListener);
+            mXorButton.addActionListener(xorListener);
+            mCaesarButton.addActionListener(caesarListener);
 
             this.addWindowListener(new WindowAdapter() {
                 @Override
